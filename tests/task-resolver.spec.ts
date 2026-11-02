@@ -26,6 +26,30 @@ describe('request-scoped GraphQL data reuse', () => {
     expect(await resolver.task('missing')).toBeNull();
   });
 
+  it('does not make gateway calls for an empty collection', async () => {
+    const { resolver, gateway } = createHarness(async (id) => ({ id, title: id }));
+    await expect(resolver.tasks([])).resolves.toEqual([]);
+    expect(gateway.fetchById).not.toHaveBeenCalled();
+  });
+
+  it('preserves duplicate missing entries while fetching once', async () => {
+    const { resolver, gateway } = createHarness(async () => null);
+    await expect(resolver.tasks(['missing', 'missing'])).resolves.toEqual([null, null]);
+    expect(gateway.fetchById).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves requested list order despite different fetch completion times', async () => {
+    const { resolver, gateway } = createHarness(async (id) => {
+      if (id === 'slow') {
+        await new Promise<void>((resolve) => setTimeout(resolve, 5));
+      }
+      return { id, title: id };
+    });
+    const tasks = await resolver.tasks(['slow', 'fast', 'slow']);
+    expect(tasks.map((task) => task?.id)).toEqual(['slow', 'fast', 'slow']);
+    expect(gateway.fetchById).toHaveBeenCalledTimes(2);
+  });
+
   it('does not cache a failure permanently within the request', async () => {
     let attempts = 0;
     const { resolver } = createHarness(async (id) => {
